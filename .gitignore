@@ -1,0 +1,8 @@
+work/
+*.pyc
+__pycache__/
+.DS_Store
+outputs/
+outputs/Gemma Chat.app/
+outputs/Gemma Desktop.app/Contents/Resources/gemma_desktop.py
+outputs/Gemma Desktop.app/Contents/Resources/__pycache__/

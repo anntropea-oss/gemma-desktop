@@ -1,0 +1,531 @@
+import SwiftUI
+import Foundation
+import AppKit
+
+struct ChatMessage: Identifiable {
+    let id = UUID()
+    let speaker: String
+    let text: String
+    let isUser: Bool
+    let isError: Bool
+}
+
+struct OllamaResponse: Decodable {
+    let response: String?
+    let error: String?
+}
+
+struct RepoFile {
+    let path: String
+    let text: String
+}
+
+struct RepoContext {
+    let name: String
+    let root: URL
+    let files: [RepoFile]
+}
+
+@MainActor
+final class ChatModel: ObservableObject {
+    @Published var messages: [ChatMessage] = [
+        ChatMessage(
+            speaker: "Gemma",
+            text: "Ask Gemma something. Gemma is running locally through Ollama. I can only use text you type, GitHub repos this app loads, or local folders you choose.",
+            isUser: false,
+            isError: false
+        )
+    ]
+    @Published var prompt = ""
+    @Published var status = "Local model: gemma4:latest"
+    @Published var repoURL = ""
+    @Published var repoStatus = "No repo or folder loaded"
+    @Published var isThinking = false
+    @Published var isLoadingRepo = false
+    private var repoContext: RepoContext?
+
+    func send() {
+        let trimmed = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, !isThinking else { return }
+
+        messages.append(ChatMessage(speaker: "You", text: trimmed, isUser: true, isError: false))
+        prompt = ""
+        isThinking = true
+        status = "Gemma is thinking"
+
+        Task {
+            do {
+                let enrichedPrompt = buildPrompt(for: trimmed)
+                let reply = try await askGemma(enrichedPrompt)
+                messages.append(ChatMessage(speaker: "Gemma", text: reply, isUser: false, isError: false))
+            } catch {
+                messages.append(ChatMessage(speaker: "Error", text: error.localizedDescription, isUser: false, isError: true))
+            }
+            isThinking = false
+            status = "Local model: gemma4:latest"
+        }
+    }
+
+    func loadRepo() {
+        let trimmed = repoURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, !isLoadingRepo else { return }
+
+        isLoadingRepo = true
+        repoStatus = "Loading repo..."
+        messages.append(ChatMessage(speaker: "Gemma", text: "Loading repository from \(trimmed)", isUser: false, isError: false))
+
+        Task {
+            do {
+                let context = try await Task.detached {
+                    try Self.cloneAndIndexRepo(trimmed)
+                }.value
+                repoContext = context
+                repoStatus = "Loaded \(context.name) (\(context.files.count) files)"
+                messages.append(ChatMessage(
+                    speaker: "Gemma",
+                    text: "Loaded \(context.name). Ask me about its files, structure, or implementation.",
+                    isUser: false,
+                    isError: false
+                ))
+            } catch {
+                repoStatus = "Repo load failed"
+                messages.append(ChatMessage(speaker: "Error", text: error.localizedDescription, isUser: false, isError: true))
+            }
+            isLoadingRepo = false
+        }
+    }
+
+    func chooseLocalFolder() {
+        guard !isLoadingRepo else { return }
+
+        let panel = NSOpenPanel()
+        panel.title = "Choose a folder Gemma Desktop can read"
+        panel.prompt = "Load Folder"
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+
+        guard panel.runModal() == .OK, let folder = panel.url else { return }
+
+        isLoadingRepo = true
+        repoStatus = "Indexing folder..."
+        messages.append(ChatMessage(speaker: "Gemma", text: "Indexing local folder \(folder.path)", isUser: false, isError: false))
+
+        Task {
+            do {
+                let context = try await Task.detached {
+                    try Self.indexLocalFolder(folder)
+                }.value
+                repoContext = context
+                repoStatus = "Loaded folder \(context.name) (\(context.files.count) files)"
+                messages.append(ChatMessage(
+                    speaker: "Gemma",
+                    text: "Loaded local folder \(context.name). Ask me about its readable files.",
+                    isUser: false,
+                    isError: false
+                ))
+            } catch {
+                repoStatus = "Folder load failed"
+                messages.append(ChatMessage(speaker: "Error", text: error.localizedDescription, isUser: false, isError: true))
+            }
+            isLoadingRepo = false
+        }
+    }
+
+    private func buildPrompt(for userPrompt: String) -> String {
+        let baseInstruction = """
+        You are Gemma running locally on this Mac through Ollama inside a desktop app.
+        You cannot directly browse the user's filesystem, open apps, or access the internet by yourself.
+        You can only use the text in this prompt and any repository or local-folder snippets the app explicitly provides.
+        If asked whether you are local, say that the model is local, but file access is limited to content selected and provided by the app.
+        Answer directly and concisely. Do not claim you are running on remote servers.
+        """
+
+        guard let repoContext else {
+            return """
+            \(baseInstruction)
+
+            User question:
+            \(userPrompt)
+            """
+        }
+
+        let snippets = selectedRepoSnippets(for: userPrompt, context: repoContext)
+        if snippets.isEmpty {
+            return """
+            \(baseInstruction)
+
+            You are answering questions about a loaded code/text source named \(repoContext.name).
+            No readable file snippets were selected for this question.
+
+            User question:
+            \(userPrompt)
+            """
+        }
+
+        return """
+        \(baseInstruction)
+
+        You are answering questions about a loaded code/text source named \(repoContext.name).
+        Use the file snippets below as your source of truth. If the snippets are not enough, say what file or detail is missing.
+
+        \(snippets)
+
+        User question:
+        \(userPrompt)
+        """
+    }
+
+    private func selectedRepoSnippets(for userPrompt: String, context: RepoContext) -> String {
+        let tokens = Set(userPrompt
+            .lowercased()
+            .split(whereSeparator: { !$0.isLetter && !$0.isNumber })
+            .map(String.init)
+            .filter { $0.count > 2 })
+
+        let scored = context.files.map { file -> (Int, RepoFile) in
+            let lowerPath = file.path.lowercased()
+            let lowerText = String(file.text.prefix(12_000)).lowercased()
+            var score = 0
+
+            if lowerPath.contains("readme") { score += 18 }
+            if lowerPath.contains("package.json") || lowerPath.contains("pyproject") || lowerPath.contains("gemfile") || lowerPath.contains("cargo.toml") { score += 12 }
+            if lowerPath.contains("src/") || lowerPath.contains("app/") { score += 4 }
+
+            for token in tokens {
+                if lowerPath.contains(token) { score += 8 }
+                if lowerText.contains(token) { score += 3 }
+            }
+
+            return (score, file)
+        }
+        .filter { $0.0 > 0 }
+        .sorted { left, right in
+            if left.0 == right.0 {
+                return left.1.path < right.1.path
+            }
+            return left.0 > right.0
+        }
+
+        let selected = scored.prefix(8).map(\.1)
+        var output = ""
+        var used = 0
+        let maxCharacters = 22_000
+
+        for file in selected {
+            let remaining = maxCharacters - used
+            guard remaining > 600 else { break }
+
+            let snippet = String(file.text.prefix(min(5_000, remaining)))
+            let section = """
+
+            --- \(file.path) ---
+            \(snippet)
+            """
+            output += section
+            used += section.count
+        }
+
+        return output
+    }
+
+    private func askGemma(_ prompt: String) async throws -> String {
+        guard let url = URL(string: "http://127.0.0.1:11434/api/generate") else {
+            throw NSError(domain: "GemmaDesktop", code: 1, userInfo: [NSLocalizedDescriptionKey: "Invalid Ollama URL."])
+        }
+
+        var request = URLRequest(url: url, timeoutInterval: 300)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONSerialization.data(withJSONObject: [
+            "model": "gemma4:latest",
+            "prompt": prompt,
+            "stream": false,
+            "options": [
+                "num_predict": 512
+            ]
+        ])
+
+        let configuration = URLSessionConfiguration.default
+        configuration.timeoutIntervalForRequest = 300
+        configuration.timeoutIntervalForResource = 600
+        let session = URLSession(configuration: configuration)
+
+        do {
+            let (data, response) = try await session.data(for: request)
+            if let http = response as? HTTPURLResponse, http.statusCode >= 400 {
+                throw NSError(domain: "GemmaDesktop", code: http.statusCode, userInfo: [NSLocalizedDescriptionKey: "Ollama returned HTTP \(http.statusCode)."])
+            }
+
+            let decoded = try JSONDecoder().decode(OllamaResponse.self, from: data)
+            if let error = decoded.error {
+                throw NSError(domain: "GemmaDesktop", code: 2, userInfo: [NSLocalizedDescriptionKey: error])
+            }
+            let text = decoded.response?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            if text.isEmpty {
+                throw NSError(domain: "GemmaDesktop", code: 4, userInfo: [NSLocalizedDescriptionKey: "Gemma returned an empty response. Try asking again with a shorter prompt."])
+            }
+            return text
+        } catch let error as URLError where error.code == .timedOut {
+            throw NSError(
+                domain: "GemmaDesktop",
+                code: URLError.timedOut.rawValue,
+                userInfo: [NSLocalizedDescriptionKey: "The local Gemma request timed out. Try a shorter prompt, or wait for Ollama to finish loading the model and send it again."]
+            )
+        }
+    }
+
+    nonisolated private static func cloneAndIndexRepo(_ rawURL: String) throws -> RepoContext {
+        let cloneURL = normalizedGitURL(rawURL)
+        let repoName = repoName(from: cloneURL)
+        let base = FileManager.default.temporaryDirectory.appendingPathComponent("GemmaDesktopRepos", isDirectory: true)
+        try FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
+
+        let target = base.appendingPathComponent("\(repoName)-\(Int(Date().timeIntervalSince1970))", isDirectory: true)
+        try runGit(args: ["clone", "--depth", "1", cloneURL, target.path])
+
+        let files = try indexFiles(at: target)
+        if files.isEmpty {
+            throw NSError(domain: "GemmaDesktop", code: 3, userInfo: [NSLocalizedDescriptionKey: "The repo was cloned, but no readable text files were found."])
+        }
+
+        return RepoContext(name: repoName, root: target, files: files)
+    }
+
+    nonisolated private static func indexLocalFolder(_ folder: URL) throws -> RepoContext {
+        let files = try indexFiles(at: folder)
+        if files.isEmpty {
+            throw NSError(domain: "GemmaDesktop", code: 5, userInfo: [NSLocalizedDescriptionKey: "No readable text/code files were found in the selected folder."])
+        }
+        return RepoContext(name: folder.lastPathComponent, root: folder, files: files)
+    }
+
+    nonisolated private static func normalizedGitURL(_ rawURL: String) -> String {
+        let trimmed = rawURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.hasPrefix("https://github.com/") && !trimmed.hasSuffix(".git") {
+            return trimmed.trimmingCharacters(in: CharacterSet(charactersIn: "/")) + ".git"
+        }
+        return trimmed
+    }
+
+    nonisolated private static func repoName(from cloneURL: String) -> String {
+        let clean = cloneURL
+            .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+            .replacingOccurrences(of: ".git", with: "")
+        let last = clean.split(separator: "/").last.map(String.init) ?? "repo"
+        let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-_"))
+        return String(last.unicodeScalars.map { allowed.contains($0) ? Character($0) : "-" })
+    }
+
+    nonisolated private static func runGit(args: [String]) throws {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+        process.arguments = args
+
+        let stderr = Pipe()
+        process.standardError = stderr
+        process.standardOutput = Pipe()
+
+        try process.run()
+        process.waitUntilExit()
+
+        guard process.terminationStatus == 0 else {
+            let errorData = stderr.fileHandleForReading.readDataToEndOfFile()
+            let message = String(data: errorData, encoding: .utf8) ?? "git failed"
+            throw NSError(domain: "GemmaDesktop", code: Int(process.terminationStatus), userInfo: [NSLocalizedDescriptionKey: message])
+        }
+    }
+
+    nonisolated private static func indexFiles(at root: URL) throws -> [RepoFile] {
+        guard let enumerator = FileManager.default.enumerator(
+            at: root,
+            includingPropertiesForKeys: [.isRegularFileKey, .fileSizeKey],
+            options: [.skipsHiddenFiles]
+        ) else {
+            return []
+        }
+
+        var files: [RepoFile] = []
+        for case let url as URL in enumerator {
+            let relativePath = url.path.replacingOccurrences(of: root.path + "/", with: "")
+            if shouldSkip(relativePath) { continue }
+
+            let values = try url.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey])
+            guard values.isRegularFile == true, (values.fileSize ?? 0) <= 250_000 else { continue }
+            guard isReadableTextPath(relativePath) else { continue }
+
+            let data = try Data(contentsOf: url)
+            guard let text = String(data: data, encoding: .utf8), !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { continue }
+            files.append(RepoFile(path: relativePath, text: text))
+
+            if files.count >= 300 { break }
+        }
+
+        return files
+    }
+
+    nonisolated private static func shouldSkip(_ path: String) -> Bool {
+        let blocked = [
+            ".git/", "node_modules/", "dist/", "build/", ".next/", ".venv/",
+            "vendor/", "target/", "coverage/", ".cache/", "__pycache__/"
+        ]
+        return blocked.contains { path.contains($0) }
+    }
+
+    nonisolated private static func isReadableTextPath(_ path: String) -> Bool {
+        let fileName = URL(fileURLWithPath: path).lastPathComponent.lowercased()
+        if ["readme", "readme.md", "license", "dockerfile", "makefile"].contains(fileName) {
+            return true
+        }
+
+        let allowedExtensions: Set<String> = [
+            "c", "cc", "cpp", "cs", "css", "go", "h", "hpp", "html", "java",
+            "js", "json", "jsx", "kt", "m", "md", "mm", "php", "plist", "py",
+            "rb", "rs", "scss", "sh", "sql", "swift", "toml", "ts", "tsx",
+            "txt", "xml", "yaml", "yml"
+        ]
+        let ext = URL(fileURLWithPath: path).pathExtension.lowercased()
+        return allowedExtensions.contains(ext)
+    }
+}
+
+struct ContentView: View {
+    @StateObject private var model = ChatModel()
+
+    var body: some View {
+        VStack(spacing: 0) {
+            header
+            Divider()
+            repoLoader
+            Divider()
+            messages
+            Divider()
+            composer
+        }
+        .frame(minWidth: 680, minHeight: 520)
+        .background(Color(nsColor: .windowBackgroundColor))
+    }
+
+    private var repoLoader: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 10) {
+                TextField("Paste a GitHub repo URL", text: $model.repoURL)
+                    .textFieldStyle(.roundedBorder)
+
+                Button {
+                    model.loadRepo()
+                } label: {
+                    Text(model.isLoadingRepo ? "Loading" : "Load Repo")
+                        .frame(width: 88)
+                }
+                .disabled(model.isLoadingRepo)
+
+                Button {
+                    model.chooseLocalFolder()
+                } label: {
+                    Text("Choose Folder")
+                        .frame(width: 112)
+                }
+                .disabled(model.isLoadingRepo)
+            }
+
+            Text(model.repoStatus)
+                .font(.system(size: 12))
+                .foregroundStyle(.secondary)
+        }
+        .padding(.horizontal, 18)
+        .padding(.vertical, 12)
+    }
+
+    private var header: some View {
+        HStack {
+            Text("Gemma Desktop")
+                .font(.system(size: 24, weight: .bold))
+            Spacer()
+            Text(model.status)
+                .font(.system(size: 13))
+                .foregroundStyle(.secondary)
+        }
+        .padding(.horizontal, 18)
+        .padding(.vertical, 14)
+    }
+
+    private var messages: some View {
+        ScrollViewReader { proxy in
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 12) {
+                    ForEach(model.messages) { message in
+                        messageView(message)
+                            .id(message.id)
+                    }
+                }
+                .padding(18)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .onChange(of: model.messages.count) {
+                if let last = model.messages.last {
+                    proxy.scrollTo(last.id, anchor: .bottom)
+                }
+            }
+        }
+    }
+
+    private func messageView(_ message: ChatMessage) -> some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Text(message.speaker)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(.secondary)
+            Text(message.text)
+                .font(.system(size: 15))
+                .textSelection(.enabled)
+        }
+        .padding(12)
+        .frame(maxWidth: 620, alignment: .leading)
+        .background(backgroundColor(for: message))
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .frame(maxWidth: .infinity, alignment: message.isUser ? .trailing : .leading)
+    }
+
+    private func backgroundColor(for message: ChatMessage) -> Color {
+        if message.isError {
+            return Color(red: 1.0, green: 0.90, blue: 0.90)
+        }
+        if message.isUser {
+            return Color(red: 0.88, green: 0.94, blue: 1.0)
+        }
+        return Color(red: 0.96, green: 0.93, blue: 0.84)
+    }
+
+    private var composer: some View {
+        HStack(alignment: .bottom, spacing: 12) {
+            TextEditor(text: $model.prompt)
+                .font(.system(size: 15))
+                .frame(minHeight: 74, maxHeight: 130)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8)
+                        .stroke(Color(nsColor: .separatorColor))
+                )
+
+            Button {
+                model.send()
+            } label: {
+                Text(model.isThinking ? "Thinking" : "Send")
+                    .frame(width: 82)
+            }
+            .controlSize(.large)
+            .keyboardShortcut(.return, modifiers: [.command])
+            .disabled(model.isThinking)
+        }
+        .padding(18)
+    }
+}
+
+@main
+struct GemmaDesktopApp: App {
+    var body: some Scene {
+        WindowGroup {
+            ContentView()
+        }
+        .windowStyle(.titleBar)
+    }
+}
