@@ -205,3 +205,11 @@
 - Files Changed: GitHub repository settings, `SOLUTIONS.md`
 - Status: Resolved
 - Verification: `gh repo view --json nameWithOwner,visibility,url,isPrivate` returned `visibility: PUBLIC` and `isPrivate: false`.
+
+## [2026-05-31 10:38] Codex Project Registry Was Cached
+- Problem: Creating a new project-scoped Codex thread for the Gemma Desktop workspace failed with `Unknown projectId`, even though the workspace is trusted in Codex config.
+- Root Cause: The folder was not in Codex Desktop's saved workspace roots, and after adding it to the saved workspace state, the running Codex app tool still used a cached project list.
+- Solution: Added the workspace to Codex Desktop's saved workspace roots as `Gemma Desktop`, renamed this thread to `Gemma Desktop Project`, and pinned it as the project home thread. A Codex app refresh/restart may be required before the app tool recognizes the newly saved project for project-scoped thread creation.
+- Files Changed: `~/.codex/.codex-global-state.json`, `SOLUTIONS.md`
+- Status: Workaround
+- Verification: The saved-state update printed `saved ... as Gemma Desktop`; this thread was renamed and pinned successfully, but `create_thread` still reported the old cached project list.
