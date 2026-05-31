@@ -130,3 +130,32 @@ In `Gemma Desktop.app`:
 3. Ask questions about that folder in the chat box.
 
 Gemma does not directly browse your Mac. The desktop app reads only the folder you choose, indexes readable text/code files, and sends relevant snippets to local Gemma.
+
+## Codex Bridge
+
+When `Gemma Desktop.app` is running, it creates a local file bridge at:
+
+```text
+~/Library/Application Support/Gemma Desktop/Bridge
+```
+
+Bridge files:
+
+```text
+inbox.json      Write a prompt here to send it into the app
+messages.json   Read the current app transcript
+status.json     Read app/model/source status
+```
+
+Send a prompt through the bridge:
+
+```sh
+mkdir -p "$HOME/Library/Application Support/Gemma Desktop/Bridge"
+printf '{"prompt":"Say hello from the bridge."}\n' > "$HOME/Library/Application Support/Gemma Desktop/Bridge/inbox.json"
+```
+
+Read the transcript:
+
+```sh
+cat "$HOME/Library/Application Support/Gemma Desktop/Bridge/messages.json"
+```

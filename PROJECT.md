@@ -23,6 +23,7 @@ Build a local-first macOS desktop app for chatting with `gemma4:latest` through 
 - Local folder loading via macOS folder picker
 - Readable text/code indexing with ignored build/dependency directories
 - Prompt-time snippet selection for relevant repo/folder context
+- Local file bridge for external tools such as Codex
 
 ## Known Boundaries
 
@@ -39,3 +40,4 @@ Build a local-first macOS desktop app for chatting with `gemma4:latest` through 
 - Persist recent repo and folder choices.
 - Improve retrieval with chunking and better scoring.
 - Add app icon and packaging polish.
+- Add a richer bridge API or signed localhost endpoint.

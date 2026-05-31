@@ -221,3 +221,27 @@
 - Files Changed: `SOLUTIONS.md`
 - Status: Open
 - Verification: `codex app <workspace>` printed `Opening workspace ...`, but `electron-saved-workspace-roots` still did not include the workspace afterward; app-server schema search did not reveal a saved-project registration method.
+
+## [2026-05-31 11:10] Codex Could Not Communicate With Gemma Desktop App
+- Problem: Codex could talk to Ollama directly, but not to the running `Gemma Desktop.app` UI/state.
+- Root Cause: The desktop app had no bridge, transcript file, or automation endpoint.
+- Solution: Added a local file bridge under `~/Library/Application Support/Gemma Desktop/Bridge` with `inbox.json` for prompts, `messages.json` for transcript export, and `status.json` for app status.
+- Files Changed: `README.md`, `PROJECT.md`, `SOLUTIONS.md`, `src/GemmaDesktop.swift`
+- Status: Resolved
+- Verification: Rebuilt and launched `Gemma Desktop.app`; writing `{"prompt":"Reply exactly: appear bridge works"}` to `inbox.json` produced a user message and a Gemma reply of `appear bridge works` in `messages.json`.
+
+## [2026-05-31 11:18] Bridge Polling Did Not Start From Model Initializer
+- Problem: The first bridge implementation wrote `status.json` and `messages.json`, but did not consume `inbox.json`.
+- Root Cause: Polling started from the model initializer with `Timer`/SwiftUI task approaches that did not reliably fire in the packaged app lifecycle.
+- Solution: Started bridge polling from the visible SwiftUI view's `onAppear` using a retained `DispatchSourceTimer` on the main queue.
+- Files Changed: `src/GemmaDesktop.swift`, `SOLUTIONS.md`
+- Status: Resolved
+- Verification: After rebuilding, the app consumed `inbox.json`, updated `status.json` to `Gemma is thinking`, and wrote the Gemma response to `messages.json`.
+
+## [2026-05-31 11:18] App Relaunch Hit LaunchServices Timing Error
+- Problem: Immediately after killing the old app process, `open outputs/Gemma Desktop.app` returned `_LSOpenURLsWithCompletionHandler() failed with error -600`.
+- Root Cause: LaunchServices was not ready to reopen the app immediately after process termination.
+- Solution: Relaunched with `open -n outputs/Gemma Desktop.app` after rebuilding.
+- Files Changed: `SOLUTIONS.md`
+- Status: Workaround
+- Verification: `open -n` launched the app and bridge files appeared under `~/Library/Application Support/Gemma Desktop/Bridge`.

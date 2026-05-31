@@ -15,6 +15,72 @@ struct OllamaResponse: Decodable {
     let error: String?
 }
 
+struct BridgeInbox: Codable {
+    let prompt: String
+}
+
+struct BridgeMessage: Codable {
+    let id: String
+    let speaker: String
+    let text: String
+    let isUser: Bool
+    let isError: Bool
+}
+
+struct BridgeStatus: Codable {
+    let model: String
+    let status: String
+    let repoStatus: String
+    let isThinking: Bool
+    let isLoadingRepo: Bool
+    let bridgeDirectory: String
+}
+
+final class FileBridge {
+    let directory: URL
+    private let encoder: JSONEncoder
+
+    init() throws {
+        let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+            ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support", isDirectory: true)
+        directory = support
+            .appendingPathComponent("Gemma Desktop", isDirectory: true)
+            .appendingPathComponent("Bridge", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+
+        encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+    }
+
+    var inboxURL: URL {
+        directory.appendingPathComponent("inbox.json")
+    }
+
+    func readInbox() throws -> BridgeInbox? {
+        guard FileManager.default.fileExists(atPath: inboxURL.path) else { return nil }
+        let data = try Data(contentsOf: inboxURL)
+        return try JSONDecoder().decode(BridgeInbox.self, from: data)
+    }
+
+    func clearInbox() throws {
+        guard FileManager.default.fileExists(atPath: inboxURL.path) else { return }
+        try FileManager.default.removeItem(at: inboxURL)
+    }
+
+    func writeMessages(_ messages: [BridgeMessage]) throws {
+        try write(messages, fileName: "messages.json")
+    }
+
+    func writeStatus(_ status: BridgeStatus) throws {
+        try write(status, fileName: "status.json")
+    }
+
+    private func write<T: Encodable>(_ value: T, fileName: String) throws {
+        let data = try encoder.encode(value)
+        try data.write(to: directory.appendingPathComponent(fileName), options: .atomic)
+    }
+}
+
 struct RepoFile {
     let path: String
     let text: String
@@ -43,15 +109,44 @@ final class ChatModel: ObservableObject {
     @Published var isThinking = false
     @Published var isLoadingRepo = false
     private var repoContext: RepoContext?
+    private var bridge: FileBridge?
+    private var bridgeTimer: DispatchSourceTimer?
+
+    init() {
+        do {
+            bridge = try FileBridge()
+            persistBridgeState()
+        } catch {
+            messages.append(ChatMessage(speaker: "Error", text: "Could not start local file bridge: \(error.localizedDescription)", isUser: false, isError: true))
+        }
+    }
+
+    func startBridgePolling() {
+        guard bridgeTimer == nil else { return }
+        let timer = DispatchSource.makeTimerSource(queue: .main)
+        timer.schedule(deadline: .now() + 1.0, repeating: 1.0)
+        timer.setEventHandler { [weak self] in
+            self?.processBridgeInbox()
+        }
+        timer.resume()
+        bridgeTimer = timer
+    }
 
     func send() {
         let trimmed = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        sendPrompt(trimmed, clearComposer: true)
+    }
+
+    private func sendPrompt(_ trimmed: String, clearComposer: Bool) {
         guard !trimmed.isEmpty, !isThinking else { return }
 
         messages.append(ChatMessage(speaker: "You", text: trimmed, isUser: true, isError: false))
-        prompt = ""
+        if clearComposer {
+            prompt = ""
+        }
         isThinking = true
         status = "Gemma is thinking"
+        persistBridgeState()
 
         Task {
             do {
@@ -63,6 +158,7 @@ final class ChatModel: ObservableObject {
             }
             isThinking = false
             status = "Local model: gemma4:latest"
+            persistBridgeState()
         }
     }
 
@@ -73,6 +169,7 @@ final class ChatModel: ObservableObject {
         isLoadingRepo = true
         repoStatus = "Loading repo..."
         messages.append(ChatMessage(speaker: "Gemma", text: "Loading repository from \(trimmed)", isUser: false, isError: false))
+        persistBridgeState()
 
         Task {
             do {
@@ -92,6 +189,7 @@ final class ChatModel: ObservableObject {
                 messages.append(ChatMessage(speaker: "Error", text: error.localizedDescription, isUser: false, isError: true))
             }
             isLoadingRepo = false
+            persistBridgeState()
         }
     }
 
@@ -110,6 +208,7 @@ final class ChatModel: ObservableObject {
         isLoadingRepo = true
         repoStatus = "Indexing folder..."
         messages.append(ChatMessage(speaker: "Gemma", text: "Indexing local folder \(folder.path)", isUser: false, isError: false))
+        persistBridgeState()
 
         Task {
             do {
@@ -129,6 +228,50 @@ final class ChatModel: ObservableObject {
                 messages.append(ChatMessage(speaker: "Error", text: error.localizedDescription, isUser: false, isError: true))
             }
             isLoadingRepo = false
+            persistBridgeState()
+        }
+    }
+
+    private func processBridgeInbox() {
+        guard let bridge, !isThinking else {
+            return
+        }
+
+        do {
+            guard let inbox = try bridge.readInbox() else { return }
+            try bridge.clearInbox()
+            let trimmed = inbox.prompt.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { return }
+            sendPrompt(trimmed, clearComposer: false)
+        } catch {
+            messages.append(ChatMessage(speaker: "Error", text: "Bridge error: \(error.localizedDescription)", isUser: false, isError: true))
+            persistBridgeState()
+        }
+    }
+
+    private func persistBridgeState() {
+        guard let bridge else { return }
+
+        do {
+            try bridge.writeMessages(messages.map { message in
+                BridgeMessage(
+                    id: message.id.uuidString,
+                    speaker: message.speaker,
+                    text: message.text,
+                    isUser: message.isUser,
+                    isError: message.isError
+                )
+            })
+            try bridge.writeStatus(BridgeStatus(
+                model: "gemma4:latest",
+                status: status,
+                repoStatus: repoStatus,
+                isThinking: isThinking,
+                isLoadingRepo: isLoadingRepo,
+                bridgeDirectory: bridge.directory.path
+            ))
+        } catch {
+            print("Bridge persistence error: \(error.localizedDescription)")
         }
     }
 
@@ -404,6 +547,9 @@ struct ContentView: View {
         }
         .frame(minWidth: 680, minHeight: 520)
         .background(Color(nsColor: .windowBackgroundColor))
+        .onAppear {
+            model.startBridgePolling()
+        }
     }
 
     private var repoLoader: some View {
