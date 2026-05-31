@@ -213,3 +213,11 @@
 - Files Changed: `~/.codex/.codex-global-state.json`, `SOLUTIONS.md`
 - Status: Workaround
 - Verification: The saved-state update printed `saved ... as Gemma Desktop`; this thread was renamed and pinned successfully, but `create_thread` still reported the old cached project list.
+
+## [2026-05-31 10:42] Codex CLI Opened Workspace But Did Not Save Project
+- Problem: Running `codex app <workspace>` opened the Gemma Desktop workspace but still did not make it appear in Codex Desktop's saved Projects list.
+- Root Cause: The public CLI supports opening a workspace path, but no supported CLI/app-server API was found for saving a workspace root into the Desktop Projects sidebar. Direct edits to `.codex-global-state.json` are overwritten by the running app state.
+- Solution: Treat project registration as a Desktop UI action: use Codex Desktop's Add/Open Project flow and choose the Gemma Desktop workspace folder. Keep this pinned thread as the project home until the UI registration is complete.
+- Files Changed: `SOLUTIONS.md`
+- Status: Open
+- Verification: `codex app <workspace>` printed `Opening workspace ...`, but `electron-saved-workspace-roots` still did not include the workspace afterward; app-server schema search did not reveal a saved-project registration method.
