@@ -261,3 +261,11 @@
 - Files Changed: `SOLUTIONS.md`, `src/GemmaDesktop.swift`
 - Status: Resolved
 - Verification: `./scripts/build-desktop-app.sh` completed successfully and a bridge smoke test returned `restyle bridge ok`.
+
+## [2026-05-31 11:25] Native Window Chrome Did Not Match App Interior
+- Problem: The app's native macOS titlebar/toolbar still looked like default system chrome while the internal app UI used a dark terminal/Codex theme.
+- Root Cause: The SwiftUI content was styled, but the containing `NSWindow` titlebar and background were left at default system styling.
+- Solution: Added an AppKit app delegate that hides the title text, makes the titlebar transparent, uses compact unified toolbar chrome, sets a dark window background, enables dragging by background, and extends content into the titlebar.
+- Files Changed: `SOLUTIONS.md`, `src/GemmaDesktop.swift`
+- Status: Resolved
+- Verification: Rebuilt and relaunched `Gemma Desktop.app`; a bridge smoke test returned `toolbar style ok`.
