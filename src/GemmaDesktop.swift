@@ -92,6 +92,19 @@ struct RepoContext {
     let files: [RepoFile]
 }
 
+enum AppTheme {
+    static let background = Color(red: 0.055, green: 0.063, blue: 0.075)
+    static let panel = Color(red: 0.086, green: 0.098, blue: 0.118)
+    static let panelRaised = Color(red: 0.115, green: 0.129, blue: 0.153)
+    static let border = Color(red: 0.23, green: 0.25, blue: 0.29)
+    static let text = Color(red: 0.91, green: 0.92, blue: 0.90)
+    static let muted = Color(red: 0.58, green: 0.61, blue: 0.65)
+    static let terminalGreen = Color(red: 0.38, green: 0.94, blue: 0.64)
+    static let codexBlue = Color(red: 0.36, green: 0.62, blue: 1.0)
+    static let amber = Color(red: 0.96, green: 0.72, blue: 0.31)
+    static let error = Color(red: 1.0, green: 0.36, blue: 0.43)
+}
+
 @MainActor
 final class ChatModel: ObservableObject {
     @Published var messages: [ChatMessage] = [
@@ -536,17 +549,18 @@ struct ContentView: View {
     @StateObject private var model = ChatModel()
 
     var body: some View {
-        VStack(spacing: 0) {
-            header
-            Divider()
-            repoLoader
-            Divider()
-            messages
-            Divider()
-            composer
+        ZStack {
+            AppTheme.background.ignoresSafeArea()
+
+            VStack(spacing: 0) {
+                header
+                repoLoader
+                messages
+                composer
+            }
+            .padding(14)
         }
-        .frame(minWidth: 680, minHeight: 520)
-        .background(Color(nsColor: .windowBackgroundColor))
+        .frame(minWidth: 760, minHeight: 560)
         .onAppear {
             model.startBridgePolling()
         }
@@ -556,44 +570,93 @@ struct ContentView: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 10) {
                 TextField("Paste a GitHub repo URL", text: $model.repoURL)
-                    .textFieldStyle(.roundedBorder)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 13, design: .monospaced))
+                    .foregroundStyle(AppTheme.text)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 9)
+                    .background(AppTheme.background)
+                    .clipShape(RoundedRectangle(cornerRadius: 7))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 7)
+                            .stroke(AppTheme.border)
+                    )
 
                 Button {
                     model.loadRepo()
                 } label: {
                     Text(model.isLoadingRepo ? "Loading" : "Load Repo")
-                        .frame(width: 88)
+                        .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                        .frame(width: 92)
                 }
+                .buttonStyle(TerminalButtonStyle(accent: AppTheme.codexBlue))
                 .disabled(model.isLoadingRepo)
 
                 Button {
                     model.chooseLocalFolder()
                 } label: {
                     Text("Choose Folder")
-                        .frame(width: 112)
+                        .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                        .frame(width: 118)
                 }
+                .buttonStyle(TerminalButtonStyle(accent: AppTheme.terminalGreen))
                 .disabled(model.isLoadingRepo)
             }
 
-            Text(model.repoStatus)
-                .font(.system(size: 12))
-                .foregroundStyle(.secondary)
+            HStack(spacing: 8) {
+                Text("source")
+                    .font(.system(size: 11, weight: .bold, design: .monospaced))
+                    .foregroundStyle(AppTheme.terminalGreen)
+                Text(model.repoStatus)
+                    .font(.system(size: 12, design: .monospaced))
+                    .foregroundStyle(AppTheme.muted)
+                Spacer()
+            }
         }
-        .padding(.horizontal, 18)
-        .padding(.vertical, 12)
+        .padding(12)
+        .background(AppTheme.panel)
+        .overlay(alignment: .top) {
+            Rectangle()
+                .fill(AppTheme.border)
+                .frame(height: 1)
+        }
     }
 
     private var header: some View {
-        HStack {
-            Text("Gemma Desktop")
-                .font(.system(size: 24, weight: .bold))
+        HStack(spacing: 14) {
+            HStack(spacing: 7) {
+                Circle().fill(Color(red: 1.0, green: 0.34, blue: 0.32)).frame(width: 11, height: 11)
+                Circle().fill(Color(red: 1.0, green: 0.78, blue: 0.25)).frame(width: 11, height: 11)
+                Circle().fill(Color(red: 0.30, green: 0.84, blue: 0.42)).frame(width: 11, height: 11)
+            }
+
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 8) {
+                    Text(">_")
+                        .font(.system(size: 18, weight: .bold, design: .monospaced))
+                        .foregroundStyle(AppTheme.terminalGreen)
+                    Text("Gemma Desktop")
+                        .font(.system(size: 22, weight: .bold, design: .monospaced))
+                        .foregroundStyle(AppTheme.text)
+                }
+                Text("local coding companion")
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(AppTheme.muted)
+            }
+
             Spacer()
-            Text(model.status)
-                .font(.system(size: 13))
-                .foregroundStyle(.secondary)
+
+            StatusPill(label: "model", value: "gemma4:latest", accent: AppTheme.amber)
+            StatusPill(label: "bridge", value: model.isThinking ? "busy" : "ready", accent: model.isThinking ? AppTheme.amber : AppTheme.terminalGreen)
         }
-        .padding(.horizontal, 18)
-        .padding(.vertical, 14)
+        .padding(14)
+        .background(AppTheme.panelRaised)
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(AppTheme.border)
+        )
+        .padding(.bottom, 10)
     }
 
     private var messages: some View {
@@ -605,9 +668,15 @@ struct ContentView: View {
                             .id(message.id)
                     }
                 }
-                .padding(18)
+                .padding(16)
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
+            .background(AppTheme.panel)
+            .clipShape(RoundedRectangle(cornerRadius: 8))
+            .overlay(
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(AppTheme.border)
+            )
             .onChange(of: model.messages.count) {
                 if let last = model.messages.last {
                     proxy.scrollTo(last.id, anchor: .bottom)
@@ -618,51 +687,154 @@ struct ContentView: View {
 
     private func messageView(_ message: ChatMessage) -> some View {
         VStack(alignment: .leading, spacing: 5) {
-            Text(message.speaker)
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(.secondary)
+            HStack(spacing: 7) {
+                Text(promptGlyph(for: message))
+                    .font(.system(size: 12, weight: .bold, design: .monospaced))
+                    .foregroundStyle(accentColor(for: message))
+                Text(message.speaker)
+                    .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(accentColor(for: message))
+            }
             Text(message.text)
-                .font(.system(size: 15))
+                .font(.system(size: 14, design: .monospaced))
+                .foregroundStyle(AppTheme.text)
                 .textSelection(.enabled)
         }
-        .padding(12)
-        .frame(maxWidth: 620, alignment: .leading)
+        .padding(13)
+        .frame(maxWidth: 680, alignment: .leading)
         .background(backgroundColor(for: message))
         .clipShape(RoundedRectangle(cornerRadius: 8))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(accentColor(for: message).opacity(0.35))
+        )
         .frame(maxWidth: .infinity, alignment: message.isUser ? .trailing : .leading)
     }
 
     private func backgroundColor(for message: ChatMessage) -> Color {
         if message.isError {
-            return Color(red: 1.0, green: 0.90, blue: 0.90)
+            return AppTheme.error.opacity(0.16)
+        }
+        if message.speaker == "Codex" {
+            return AppTheme.codexBlue.opacity(0.15)
         }
         if message.isUser {
-            return Color(red: 0.88, green: 0.94, blue: 1.0)
+            return AppTheme.terminalGreen.opacity(0.12)
         }
-        return Color(red: 0.96, green: 0.93, blue: 0.84)
+        return AppTheme.panelRaised
+    }
+
+    private func accentColor(for message: ChatMessage) -> Color {
+        if message.isError {
+            return AppTheme.error
+        }
+        if message.speaker == "Codex" {
+            return AppTheme.codexBlue
+        }
+        if message.isUser {
+            return AppTheme.terminalGreen
+        }
+        return AppTheme.amber
+    }
+
+    private func promptGlyph(for message: ChatMessage) -> String {
+        if message.isError {
+            return "!"
+        }
+        if message.speaker == "Codex" {
+            return "◆"
+        }
+        if message.isUser {
+            return "$"
+        }
+        return "●"
     }
 
     private var composer: some View {
-        HStack(alignment: .bottom, spacing: 12) {
-            TextEditor(text: $model.prompt)
-                .font(.system(size: 15))
-                .frame(minHeight: 74, maxHeight: 130)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 8)
-                        .stroke(Color(nsColor: .separatorColor))
-                )
-
-            Button {
-                model.send()
-            } label: {
-                Text(model.isThinking ? "Thinking" : "Send")
-                    .frame(width: 82)
+        VStack(spacing: 8) {
+            HStack(spacing: 8) {
+                Text("prompt")
+                    .font(.system(size: 11, weight: .bold, design: .monospaced))
+                    .foregroundStyle(AppTheme.terminalGreen)
+                Text(model.status)
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(AppTheme.muted)
+                Spacer()
             }
-            .controlSize(.large)
-            .keyboardShortcut(.return, modifiers: [.command])
-            .disabled(model.isThinking)
+
+            HStack(alignment: .bottom, spacing: 12) {
+                TextEditor(text: $model.prompt)
+                    .font(.system(size: 14, design: .monospaced))
+                    .foregroundStyle(AppTheme.text)
+                    .scrollContentBackground(.hidden)
+                    .background(AppTheme.background)
+                    .frame(minHeight: 76, maxHeight: 132)
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8)
+                            .stroke(AppTheme.border)
+                    )
+
+                Button {
+                    model.send()
+                } label: {
+                    Text(model.isThinking ? "WAIT" : "SEND")
+                        .font(.system(size: 12, weight: .bold, design: .monospaced))
+                        .frame(width: 76)
+                }
+                .buttonStyle(TerminalButtonStyle(accent: AppTheme.amber))
+                .keyboardShortcut(.return, modifiers: [.command])
+                .disabled(model.isThinking)
+            }
         }
-        .padding(18)
+        .padding(14)
+        .background(AppTheme.panelRaised)
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(AppTheme.border)
+        )
+        .padding(.top, 10)
+    }
+}
+
+struct StatusPill: View {
+    let label: String
+    let value: String
+    let accent: Color
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Text(label)
+                .foregroundStyle(AppTheme.muted)
+            Text(value)
+                .foregroundStyle(accent)
+        }
+        .font(.system(size: 11, weight: .semibold, design: .monospaced))
+        .padding(.horizontal, 9)
+        .padding(.vertical, 6)
+        .background(AppTheme.background)
+        .clipShape(RoundedRectangle(cornerRadius: 7))
+        .overlay(
+            RoundedRectangle(cornerRadius: 7)
+                .stroke(accent.opacity(0.35))
+        )
+    }
+}
+
+struct TerminalButtonStyle: ButtonStyle {
+    let accent: Color
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .foregroundStyle(configuration.isPressed ? AppTheme.background : accent)
+            .padding(.vertical, 8)
+            .background(configuration.isPressed ? accent : accent.opacity(0.12))
+            .clipShape(RoundedRectangle(cornerRadius: 7))
+            .overlay(
+                RoundedRectangle(cornerRadius: 7)
+                    .stroke(accent.opacity(configuration.isPressed ? 0.9 : 0.45))
+            )
     }
 }
 

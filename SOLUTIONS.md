@@ -253,3 +253,11 @@
 - Files Changed: `README.md`, `SOLUTIONS.md`, `src/GemmaDesktop.swift`
 - Status: Resolved
 - Verification: Rebuilt and relaunched the app; a bridge prompt appeared in `messages.json` with `speaker: "Codex"` and Gemma replied `codex label works`.
+
+## [2026-05-31 11:24] App Needed Terminal/Codex Visual Design
+- Problem: The native app worked but looked plain and did not reflect the requested terminal/Codex mashup aesthetic.
+- Root Cause: The original SwiftUI layout used default light system styling and simple message cards.
+- Solution: Added a dark terminal-inspired theme, Codex-like status chrome, monospace accents, distinct `Codex`/`You`/`Gemma` message treatments, styled source controls, and a darker composer surface.
+- Files Changed: `SOLUTIONS.md`, `src/GemmaDesktop.swift`
+- Status: Resolved
+- Verification: `./scripts/build-desktop-app.sh` completed successfully and a bridge smoke test returned `restyle bridge ok`.
