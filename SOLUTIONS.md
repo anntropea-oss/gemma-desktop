@@ -269,3 +269,11 @@
 - Files Changed: `SOLUTIONS.md`, `src/GemmaDesktop.swift`
 - Status: Resolved
 - Verification: Rebuilt and relaunched `Gemma Desktop.app`; a bridge smoke test returned `toolbar style ok`.
+
+## [2026-05-31 11:30] App Icon Still Used Default Placeholder
+- Problem: The Dock/app switcher icon still showed the default macOS app placeholder instead of matching the terminal/Codex internal style.
+- Root Cause: The app bundle did not define `CFBundleIconFile` or include a generated `.icns` icon.
+- Solution: Added a Swift/AppKit icon generator, wired the build script to create `GemmaDesktop.icns`, and set `CFBundleIconFile` in the app plist template.
+- Files Changed: `SOLUTIONS.md`, `packaging/GemmaDesktop-Info.plist`, `scripts/build-desktop-app.sh`, `scripts/generate-app-icon.swift`
+- Status: Resolved
+- Verification: Rebuilt the app; `GemmaDesktop.icns` was generated in `Contents/Resources`, `CFBundleIconFile` resolves to `GemmaDesktop`, and the app relaunched successfully.

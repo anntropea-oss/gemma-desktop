@@ -8,6 +8,8 @@
   <string>local.gemma.desktop</string>
   <key>CFBundleName</key>
   <string>Gemma Desktop</string>
+  <key>CFBundleIconFile</key>
+  <string>GemmaDesktop</string>
   <key>CFBundlePackageType</key>
   <string>APPL</string>
   <key>CFBundleShortVersionString</key>
