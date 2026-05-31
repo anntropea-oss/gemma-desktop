@@ -154,6 +154,8 @@ mkdir -p "$HOME/Library/Application Support/Gemma Desktop/Bridge"
 printf '{"prompt":"Say hello from the bridge."}\n' > "$HOME/Library/Application Support/Gemma Desktop/Bridge/inbox.json"
 ```
 
+Prompts sent through the bridge appear in the app transcript as `Codex`. Prompts typed directly in the app appear as `You`.
+
 Read the transcript:
 
 ```sh

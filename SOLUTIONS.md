@@ -245,3 +245,11 @@
 - Files Changed: `SOLUTIONS.md`
 - Status: Workaround
 - Verification: `open -n` launched the app and bridge files appeared under `~/Library/Application Support/Gemma Desktop/Bridge`.
+
+## [2026-05-31 11:20] Bridge Prompts Were Labeled As You
+- Problem: Prompts sent by Codex through the file bridge appeared in the app transcript as `You`, making them hard to distinguish from prompts typed by the user directly in the app.
+- Root Cause: The app used the same `sendPrompt` path and hard-coded `speaker: "You"` for all user-side prompts.
+- Solution: Added a `speaker` parameter to `sendPrompt`; direct app prompts remain labeled `You`, while bridge prompts are labeled `Codex`.
+- Files Changed: `README.md`, `SOLUTIONS.md`, `src/GemmaDesktop.swift`
+- Status: Resolved
+- Verification: Rebuilt and relaunched the app; a bridge prompt appeared in `messages.json` with `speaker: "Codex"` and Gemma replied `codex label works`.

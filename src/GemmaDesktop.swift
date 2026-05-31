@@ -134,13 +134,13 @@ final class ChatModel: ObservableObject {
 
     func send() {
         let trimmed = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
-        sendPrompt(trimmed, clearComposer: true)
+        sendPrompt(trimmed, speaker: "You", clearComposer: true)
     }
 
-    private func sendPrompt(_ trimmed: String, clearComposer: Bool) {
+    private func sendPrompt(_ trimmed: String, speaker: String, clearComposer: Bool) {
         guard !trimmed.isEmpty, !isThinking else { return }
 
-        messages.append(ChatMessage(speaker: "You", text: trimmed, isUser: true, isError: false))
+        messages.append(ChatMessage(speaker: speaker, text: trimmed, isUser: true, isError: false))
         if clearComposer {
             prompt = ""
         }
@@ -242,7 +242,7 @@ final class ChatModel: ObservableObject {
             try bridge.clearInbox()
             let trimmed = inbox.prompt.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !trimmed.isEmpty else { return }
-            sendPrompt(trimmed, clearComposer: false)
+            sendPrompt(trimmed, speaker: "Codex", clearComposer: false)
         } catch {
             messages.append(ChatMessage(speaker: "Error", text: "Bridge error: \(error.localizedDescription)", isUser: false, isError: true))
             persistBridgeState()
