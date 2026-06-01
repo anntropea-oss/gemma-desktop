@@ -22,7 +22,9 @@ Build a local-first macOS desktop app for chatting with `gemma4:latest` through 
 - GitHub repo loading via shallow `git clone`
 - Local folder loading via macOS folder picker
 - Readable text/code indexing with ignored build/dependency directories
+- Local source metadata for repo size and Git-tracked file counts
 - Prompt-time snippet selection for relevant repo/folder context
+- Detailed Ollama HTTP error messages
 - Local file bridge for external tools such as Codex
 
 ## Known Boundaries

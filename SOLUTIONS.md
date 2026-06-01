@@ -277,3 +277,11 @@
 - Files Changed: `SOLUTIONS.md`, `packaging/GemmaDesktop-Info.plist`, `scripts/build-desktop-app.sh`, `scripts/generate-app-icon.swift`
 - Status: Resolved
 - Verification: Rebuilt the app; `GemmaDesktop.icns` was generated in `Contents/Resources`, `CFBundleIconFile` resolves to `GemmaDesktop`, and the app relaunched successfully.
+
+## [2026-06-01 09:09] Repo Size Question Returned Opaque Ollama Error
+- Problem: After loading `https://github.com/anntropea-oss/fantasybaseball`, asking `how big is this repo` showed only `Ollama returned HTTP 500.` in `Gemma Desktop.app`.
+- Root Cause: The app sent simple source-metadata questions through the local model instead of answering from the cloned repo data it already had, and the Ollama HTTP error handler discarded the response body that could explain failures.
+- Solution: Added cached source metadata for local disk size and Git-tracked file count, short-circuited repo size/file-count questions with a local answer, included source metadata in model prompts, and surfaced Ollama error details when HTTP errors occur.
+- Files Changed: `README.md`, `PROJECT.md`, `SOLUTIONS.md`, `src/GemmaDesktop.swift`
+- Status: Resolved
+- Verification: Rebuilt `outputs/Gemma Desktop.app` successfully and relaunched it; a bridge smoke test returned `patched app alive`.

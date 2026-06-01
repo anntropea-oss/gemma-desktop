@@ -119,7 +119,7 @@ In `Gemma Desktop.app`:
 2. Click `Load Repo`.
 3. Ask questions about the repo in the chat box.
 
-The app performs a shallow local `git clone`, indexes readable text/code files, and sends the most relevant snippets to local Gemma with each question.
+The app performs a shallow local `git clone`, indexes readable text/code files, and sends the most relevant snippets to local Gemma with each question. It also keeps basic local metadata, so questions like `how big is this repo?` and `how many files are in it?` can be answered directly from the cloned repo.
 
 ## Loading Local Files
 

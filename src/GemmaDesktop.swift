@@ -15,6 +15,10 @@ struct OllamaResponse: Decodable {
     let error: String?
 }
 
+struct OllamaErrorResponse: Decodable {
+    let error: String?
+}
+
 struct BridgeInbox: Codable {
     let prompt: String
 }
@@ -90,6 +94,8 @@ struct RepoContext {
     let name: String
     let root: URL
     let files: [RepoFile]
+    let diskSizeBytes: Int64
+    let trackedFileCount: Int?
 }
 
 enum AppTheme {
@@ -185,6 +191,13 @@ final class ChatModel: ObservableObject {
         if clearComposer {
             prompt = ""
         }
+
+        if let localAnswer = localRepoAnswer(for: trimmed) {
+            messages.append(ChatMessage(speaker: "Gemma", text: localAnswer, isUser: false, isError: false))
+            persistBridgeState()
+            return
+        }
+
         isThinking = true
         status = "Gemma is thinking"
         persistBridgeState()
@@ -335,11 +348,15 @@ final class ChatModel: ObservableObject {
         }
 
         let snippets = selectedRepoSnippets(for: userPrompt, context: repoContext)
+        let summary = repoSummary(for: repoContext)
         if snippets.isEmpty {
             return """
             \(baseInstruction)
 
             You are answering questions about a loaded code/text source named \(repoContext.name).
+            Source summary:
+            \(summary)
+
             No readable file snippets were selected for this question.
 
             User question:
@@ -352,12 +369,50 @@ final class ChatModel: ObservableObject {
 
         You are answering questions about a loaded code/text source named \(repoContext.name).
         Use the file snippets below as your source of truth. If the snippets are not enough, say what file or detail is missing.
+        Source summary:
+        \(summary)
 
         \(snippets)
 
         User question:
         \(userPrompt)
         """
+    }
+
+    private func localRepoAnswer(for userPrompt: String) -> String? {
+        guard let repoContext else { return nil }
+
+        let lower = userPrompt.lowercased()
+        let asksAboutSize = lower.contains("how big")
+            || lower.contains("repo size")
+            || lower.contains("repository size")
+            || (lower.contains("size") && (lower.contains("repo") || lower.contains("repository") || lower.contains("source")))
+        let asksAboutFiles = lower.contains("how many files")
+            || lower.contains("file count")
+            || lower.contains("files are in")
+
+        guard asksAboutSize || asksAboutFiles else { return nil }
+
+        let tracked = repoContext.trackedFileCount.map { "\($0) Git-tracked files" } ?? "Git-tracked file count unavailable"
+        return """
+        \(repoContext.name) is \(formatBytes(repoContext.diskSizeBytes)) on disk in the local app cache. I indexed \(repoContext.files.count) readable text/code files, and Git reports \(tracked).
+        """
+    }
+
+    private func repoSummary(for context: RepoContext) -> String {
+        let tracked = context.trackedFileCount.map(String.init) ?? "unknown"
+        return """
+        - Local cached size: \(formatBytes(context.diskSizeBytes))
+        - Indexed readable text/code files: \(context.files.count)
+        - Git-tracked files: \(tracked)
+        """
+    }
+
+    private func formatBytes(_ bytes: Int64) -> String {
+        let formatter = ByteCountFormatter()
+        formatter.countStyle = .file
+        formatter.includesActualByteCount = true
+        return formatter.string(fromByteCount: bytes)
     }
 
     private func selectedRepoSnippets(for userPrompt: String, context: RepoContext) -> String {
@@ -438,7 +493,8 @@ final class ChatModel: ObservableObject {
         do {
             let (data, response) = try await session.data(for: request)
             if let http = response as? HTTPURLResponse, http.statusCode >= 400 {
-                throw NSError(domain: "GemmaDesktop", code: http.statusCode, userInfo: [NSLocalizedDescriptionKey: "Ollama returned HTTP \(http.statusCode)."])
+                let detail = Self.ollamaErrorDetail(from: data)
+                throw NSError(domain: "GemmaDesktop", code: http.statusCode, userInfo: [NSLocalizedDescriptionKey: "Ollama returned HTTP \(http.statusCode): \(detail)"])
             }
 
             let decoded = try JSONDecoder().decode(OllamaResponse.self, from: data)
@@ -459,6 +515,21 @@ final class ChatModel: ObservableObject {
         }
     }
 
+    nonisolated private static func ollamaErrorDetail(from data: Data) -> String {
+        if let decoded = try? JSONDecoder().decode(OllamaErrorResponse.self, from: data),
+           let error = decoded.error?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !error.isEmpty {
+            return error
+        }
+
+        if let text = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !text.isEmpty {
+            return String(text.prefix(500))
+        }
+
+        return "No error details were returned by Ollama."
+    }
+
     nonisolated private static func cloneAndIndexRepo(_ rawURL: String) throws -> RepoContext {
         let cloneURL = normalizedGitURL(rawURL)
         let repoName = repoName(from: cloneURL)
@@ -473,7 +544,13 @@ final class ChatModel: ObservableObject {
             throw NSError(domain: "GemmaDesktop", code: 3, userInfo: [NSLocalizedDescriptionKey: "The repo was cloned, but no readable text files were found."])
         }
 
-        return RepoContext(name: repoName, root: target, files: files)
+        return RepoContext(
+            name: repoName,
+            root: target,
+            files: files,
+            diskSizeBytes: directorySizeBytes(at: target),
+            trackedFileCount: gitTrackedFileCount(at: target)
+        )
     }
 
     nonisolated private static func indexLocalFolder(_ folder: URL) throws -> RepoContext {
@@ -481,7 +558,13 @@ final class ChatModel: ObservableObject {
         if files.isEmpty {
             throw NSError(domain: "GemmaDesktop", code: 5, userInfo: [NSLocalizedDescriptionKey: "No readable text/code files were found in the selected folder."])
         }
-        return RepoContext(name: folder.lastPathComponent, root: folder, files: files)
+        return RepoContext(
+            name: folder.lastPathComponent,
+            root: folder,
+            files: files,
+            diskSizeBytes: directorySizeBytes(at: folder),
+            trackedFileCount: gitTrackedFileCount(at: folder)
+        )
     }
 
     nonisolated private static func normalizedGitURL(_ rawURL: String) -> String {
@@ -518,6 +601,59 @@ final class ChatModel: ObservableObject {
             let message = String(data: errorData, encoding: .utf8) ?? "git failed"
             throw NSError(domain: "GemmaDesktop", code: Int(process.terminationStatus), userInfo: [NSLocalizedDescriptionKey: message])
         }
+    }
+
+    nonisolated private static func runGitCapture(args: [String]) throws -> String {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+        process.arguments = args
+
+        let stdout = Pipe()
+        let stderr = Pipe()
+        process.standardOutput = stdout
+        process.standardError = stderr
+
+        try process.run()
+        process.waitUntilExit()
+
+        guard process.terminationStatus == 0 else {
+            let errorData = stderr.fileHandleForReading.readDataToEndOfFile()
+            let message = String(data: errorData, encoding: .utf8) ?? "git failed"
+            throw NSError(domain: "GemmaDesktop", code: Int(process.terminationStatus), userInfo: [NSLocalizedDescriptionKey: message])
+        }
+
+        let data = stdout.fileHandleForReading.readDataToEndOfFile()
+        return String(data: data, encoding: .utf8) ?? ""
+    }
+
+    nonisolated private static func gitTrackedFileCount(at root: URL) -> Int? {
+        guard let output = try? runGitCapture(args: ["-C", root.path, "ls-files"]) else {
+            return nil
+        }
+
+        return output
+            .split(whereSeparator: \.isNewline)
+            .count
+    }
+
+    nonisolated private static func directorySizeBytes(at root: URL) -> Int64 {
+        guard let enumerator = FileManager.default.enumerator(
+            at: root,
+            includingPropertiesForKeys: [.isRegularFileKey, .fileSizeKey],
+            options: []
+        ) else {
+            return 0
+        }
+
+        var total: Int64 = 0
+        for case let url as URL in enumerator {
+            guard let values = try? url.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey]),
+                  values.isRegularFile == true else {
+                continue
+            }
+            total += Int64(values.fileSize ?? 0)
+        }
+        return total
     }
 
     nonisolated private static func indexFiles(at root: URL) throws -> [RepoFile] {
