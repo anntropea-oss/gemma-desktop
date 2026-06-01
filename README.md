@@ -1,6 +1,6 @@
 # Gemma Desktop
 
-This project builds a local-first macOS desktop app for using `gemma4:latest` through Ollama. It supports normal local chat, GitHub repo loading, and user-approved local folder loading.
+This project builds a local-first macOS desktop app for using local Ollama models such as `gemma4:latest`. It supports streaming chat, GitHub repo loading, user-approved local folder loading, visible source context, and a file bridge for Codex.
 
 ## Quick Start
 
@@ -69,10 +69,11 @@ http://127.0.0.1:11434
 ## Project Structure
 
 ```text
-src/GemmaDesktop.swift          Native SwiftUI app source
+src/*.swift                     Native SwiftUI app source
 scripts/build-desktop-app.sh    Build script for the desktop app
 outputs/Gemma Desktop.app       Built macOS app
 gemma.py                        Small terminal fallback
+tests/run-unit-tests.sh         Source indexer smoke tests
 PROJECT.md                      Project goals, status, and next work
 SOLUTIONS.md                    Issue and fix log
 ```
@@ -95,6 +96,12 @@ Check that Ollama is responding:
 
 ```sh
 curl -s http://127.0.0.1:11434/api/tags
+```
+
+Run the smoke tests:
+
+```sh
+./tests/run-unit-tests.sh
 ```
 
 ## Codex Model Picker
@@ -121,6 +128,8 @@ In `Gemma Desktop.app`:
 
 The app performs a shallow local `git clone`, indexes readable text/code files, and sends the most relevant snippets to local Gemma with each question. It also keeps basic local metadata, so questions like `how big is this repo?` and `how many files are in it?` can be answered directly from the cloned repo.
 
+The optional `branch/tag` field lets you load a specific branch, tag, or ref. Private repos can work when your local Git installation already has credentials for that remote.
+
 ## Loading Local Files
 
 In `Gemma Desktop.app`:
@@ -129,7 +138,18 @@ In `Gemma Desktop.app`:
 2. Pick a local folder or repo you want the app to read.
 3. Ask questions about that folder in the chat box.
 
-Gemma does not directly browse your Mac. The desktop app reads only the folder you choose, indexes readable text/code files, and sends relevant snippets to local Gemma.
+Gemma does not directly browse your Mac. The desktop app reads only the folder you choose, indexes readable text/code files, chunks larger text files, and sends relevant snippets to local Gemma. The context panel shows indexed files and the snippets selected for the last prompt.
+
+## Settings
+
+Open `Settings` in the app to:
+
+- Refresh local Ollama models from `/api/tags`
+- Pick the model
+- Change the Ollama base URL
+- Adjust timeout and response token limits
+
+The prompt button changes to `STOP` while Gemma is streaming, so long local requests can be canceled.
 
 ## Codex Bridge
 
@@ -142,22 +162,29 @@ When `Gemma Desktop.app` is running, it creates a local file bridge at:
 Bridge files:
 
 ```text
-inbox.json      Write a prompt here to send it into the app
-messages.json   Read the current app transcript
-status.json     Read app/model/source status
+requests/*.json    Queue prompts into the app
+responses/*.json   Read per-request bridge responses
+inbox.json         Legacy single-prompt input, still supported
+messages.json      Read the current app transcript
+status.json        Read app/model/source status
 ```
 
 Send a prompt through the bridge:
 
 ```sh
 mkdir -p "$HOME/Library/Application Support/Gemma Desktop/Bridge"
-printf '{"prompt":"Say hello from the bridge."}\n' > "$HOME/Library/Application Support/Gemma Desktop/Bridge/inbox.json"
+bridge="$HOME/Library/Application Support/Gemma Desktop/Bridge"
+mkdir -p "$bridge/requests"
+id="request-$(date +%s)"
+created="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+printf '{"id":"%s","prompt":"Say hello from the bridge.","createdAt":"%s"}\n' "$id" "$created" > "$bridge/requests/$id.json"
 ```
 
 Prompts sent through the bridge appear in the app transcript as `Codex`. Prompts typed directly in the app appear as `You`.
 
-Read the transcript:
+Read the response or transcript:
 
 ```sh
+cat "$HOME/Library/Application Support/Gemma Desktop/Bridge/responses/$id.json"
 cat "$HOME/Library/Application Support/Gemma Desktop/Bridge/messages.json"
 ```

@@ -285,3 +285,43 @@
 - Files Changed: `README.md`, `PROJECT.md`, `SOLUTIONS.md`, `src/GemmaDesktop.swift`
 - Status: Resolved
 - Verification: Rebuilt `outputs/Gemma Desktop.app` successfully and relaunched it; a bridge smoke test returned `patched app alive`.
+
+## [2026-06-01 09:42] Hardening Review Found Operational Risks
+- Problem: A review of `Gemma Desktop.app` found likely future usability and reliability risks: bridge prompts use a single `inbox.json` and can be overwritten while Gemma is busy; long Ollama requests cannot be canceled; cloned repos accumulate in the temporary cache; repo/folder indexing silently skips large files, many files, unsupported extensions, and later chunks; the UI does not show which files/snippets Gemma actually saw; local folder size scanning can traverse large dependency directories; and the model name/Ollama URL are hard-coded.
+- Root Cause: The app was built as a focused local prototype with minimal state, a single active request, simple keyword retrieval, fixed model configuration, and no explicit context-management UI.
+- Solution: No code fix applied yet. Recommended next work is to add a real request queue, stop/cancel support, source cache cleanup, visible indexed-file/snippet panels, better chunking/retrieval, configurable model/Ollama settings, and safer folder indexing limits.
+- Files Changed: `SOLUTIONS.md`
+- Status: Open
+- Verification: Static review of `src/GemmaDesktop.swift`, `README.md`, `PROJECT.md`, build script, and packaging files.
+
+## [2026-06-01 09:58] Hardening Pass Implemented
+- Problem: The review risks made the app fragile for day-to-day use: no queued bridge, no stop button, hidden context selection, hard-coded Ollama settings, temporary repo buildup, and all app logic concentrated in one Swift file.
+- Root Cause: The first desktop app was optimized for quickly proving local Gemma could work, not for sustained repo-analysis workflows.
+- Solution: Split the Swift app into focused components, added streaming generation with Stop support, added configurable Ollama/model settings loaded from `/api/tags`, replaced the bridge with queued request/response files while keeping legacy `inbox.json`, added context visibility for indexed files and selected snippets, added source clear/cache cleanup, added branch/tag repo loading, improved chunked source retrieval, and documented the new workflow.
+- Files Changed: `README.md`, `PROJECT.md`, `SOLUTIONS.md`, `scripts/build-desktop-app.sh`, `src/AppTheme.swift`, `src/ChatModel.swift`, `src/ContentView.swift`, `src/FileBridge.swift`, `src/GemmaDesktopApp.swift`, `src/Models.swift`, `src/OllamaClient.swift`, `src/SourceIndexer.swift`, `src/GemmaDesktop.swift`, `tests/SourceIndexerSmokeTests.swift`, `tests/run-unit-tests.sh`
+- Status: Resolved
+- Verification: `./scripts/build-desktop-app.sh` completed successfully; queued bridge smoke test returned `queued bridge streaming ok`.
+
+## [2026-06-01 09:58] Source Indexer Test Exposed Path Normalization Bug
+- Problem: The new source-indexer smoke test failed because `README.md` was not found under the expected relative path.
+- Root Cause: macOS temporary paths can appear as both `/var/...` and `/private/var/...`; the indexer used plain string replacement against the original root path, so relative paths could retain unexpected absolute path pieces.
+- Solution: Normalized both root and file URLs with `resolvingSymlinksInPath()` before computing relative source paths.
+- Files Changed: `SOLUTIONS.md`, `src/SourceIndexer.swift`, `tests/SourceIndexerSmokeTests.swift`, `tests/run-unit-tests.sh`
+- Status: Resolved
+- Verification: `./tests/run-unit-tests.sh` passed and `./scripts/build-desktop-app.sh` completed successfully afterward.
+
+## [2026-06-01 09:59] Minimum macOS Version Was Too Low For Streaming
+- Problem: The app package still advertised macOS 10.15 support even after adding streaming generation through modern `URLSession` async APIs.
+- Root Cause: The plist version metadata was left over from the initial app bundle and was not updated when the networking implementation changed.
+- Solution: Raised `LSMinimumSystemVersion` to `12.0`.
+- Files Changed: `SOLUTIONS.md`, `packaging/GemmaDesktop-Info.plist`
+- Status: Resolved
+- Verification: Rebuilt the app after the plist update.
+
+## [2026-06-01 10:02] Bridge Queue Needed More Forgiving Request Handling
+- Problem: Queued bridge requests originally required `id` and `createdAt`, and malformed request JSON could remain in the queue and repeatedly produce bridge errors. A shell verification command also failed to find a successful response because it did not handle the space in `Application Support`.
+- Root Cause: The first queued bridge schema was stricter than the legacy `inbox.json` format, and the verification command used path-unsafe `xargs`.
+- Solution: Made queued bridge request IDs and timestamps optional with generated defaults, removed malformed queue files after reporting the decode error, and reran verification with null-delimited path handling.
+- Files Changed: `SOLUTIONS.md`, `src/FileBridge.swift`, `src/Models.swift`
+- Status: Resolved
+- Verification: Rebuilt and relaunched the app; a prompt-only queued request returned `prompt only bridge ok` in `responses/*.json`.

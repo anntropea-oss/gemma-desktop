@@ -9,7 +9,7 @@ cp "$ROOT/packaging/GemmaDesktop-Info.plist" "$APP/Contents/Info.plist"
 swift "$ROOT/scripts/generate-app-icon.swift" "$APP/Contents/Resources/GemmaDesktop.icns"
 
 swiftc -parse-as-library \
-  "$ROOT/src/GemmaDesktop.swift" \
+  "$ROOT"/src/*.swift \
   -o "$APP/Contents/MacOS/Gemma Desktop"
 
 chmod +x "$APP/Contents/MacOS/Gemma Desktop"
