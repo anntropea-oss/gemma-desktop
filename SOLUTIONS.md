@@ -325,3 +325,19 @@
 - Files Changed: `SOLUTIONS.md`, `src/FileBridge.swift`, `src/Models.swift`
 - Status: Resolved
 - Verification: Rebuilt and relaunched the app; a prompt-only queued request returned `prompt only bridge ok` in `responses/*.json`.
+
+## [2026-06-04 09:30] Bridge Requests Not Processed From Codex
+- Problem: Codex wrote both queued `requests/*.json` and documented `inbox.json` bridge prompts while `Gemma Desktop.app` and Ollama were running, but no matching response file or `messages.json` transcript update appeared within 20 seconds.
+- Root Cause: The running app/source state was inconsistent: bridge requests were not being consumed, source inspection found unresolved conflict markers around `BridgeRequest` in `src/Models.swift`, and the build script had drifted away from the current multi-file Swift layout.
+- Solution: Restored the tracked Swift bridge source layout, removed unresolved conflict markers from `src/Models.swift`, repaired the build script to compile `src/*.swift`, rebuilt `outputs/Gemma Desktop.app`, relaunched the app, and retested the queued request bridge.
+- Files Changed: `SOLUTIONS.md`, `src/Models.swift`, `src/ChatModel.swift`, `src/ContentView.swift`, `src/FileBridge.swift`, `src/OllamaClient.swift`, `src/SourceIndexer.swift`, `scripts/build-desktop-app.sh`, `outputs/Gemma Desktop.app`
+- Status: Resolved
+- Verification: `scripts/build-desktop-app.sh` built successfully; relaunched `Gemma Desktop.app`; writing `requests/codex-ping-1780580349.json` produced `responses/codex-ping-1780580349.json` with `ok: true` and `text: "hello codex bridge ok"`; `messages.json` showed the prompt labeled `Codex` and Gemma's reply.
+
+## [2026-06-04 09:47] Dirty Docs Regressed Hardened App Documentation
+- Problem: Uncommitted changes in `README.md`, `PROJECT.md`, `SOLUTIONS.md`, and `packaging/GemmaDesktop-Info.plist` partially rolled the repository documentation and package metadata back to the pre-hardening app shape: single `src/GemmaDesktop.swift`, legacy `inbox.json` bridge only, no streaming/settings/context panel/test docs, removed hardening log entries, and macOS minimum lowered from `12.0` to `10.15`.
+- Root Cause: Unknown. The source files matched the hardened multi-file app layout, but the dirty docs/plist edits did not match that source state.
+- Solution: Restored `README.md`, `PROJECT.md`, `packaging/GemmaDesktop-Info.plist`, and the prior `SOLUTIONS.md` hardening entries from the last good commit, then re-added the June 4 bridge incident as a separate log entry.
+- Files Changed: `README.md`, `PROJECT.md`, `SOLUTIONS.md`, `packaging/GemmaDesktop-Info.plist`
+- Status: Resolved
+- Verification: `git diff -- README.md PROJECT.md packaging/GemmaDesktop-Info.plist` is empty; `find src -maxdepth 1 -type f` shows the hardened multi-file Swift layout is present.
