@@ -151,6 +151,8 @@ Open `Settings` in the app to:
 
 The prompt button changes to `STOP` while Gemma is streaming, so long local requests can be canceled.
 
+Code-review prompts get a little extra guardrail: the app asks Ollama for final-answer output instead of hidden reasoning, uses a larger default response budget, and retries once when a review response is empty or too short to be useful.
+
 ## Codex Bridge
 
 When `Gemma Desktop.app` is running, it creates a local file bridge at:

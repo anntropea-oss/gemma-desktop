@@ -19,6 +19,7 @@ Build a local-first macOS desktop app for chatting with `gemma4:latest` through 
 - Streaming local Ollama chat through `/api/generate`
 - Configurable model, Ollama URL, timeout, and token limit
 - Stop/cancel support for long local generations
+- Code-review prompt guardrails with hidden-reasoning suppression and short/empty response retry
 - Empty-response error handling
 - GitHub repo loading via shallow `git clone`
 - Branch/tag/ref loading and private repo support through local Git credentials

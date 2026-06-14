@@ -341,3 +341,11 @@
 - Files Changed: `README.md`, `PROJECT.md`, `SOLUTIONS.md`, `packaging/GemmaDesktop-Info.plist`
 - Status: Resolved
 - Verification: `git diff -- README.md PROJECT.md packaging/GemmaDesktop-Info.plist` is empty; `find src -maxdepth 1 -type f` shows the hardened multi-file Swift layout is present.
+
+## [2026-06-14 10:54] Gemma Returned Empty Or Tiny Code Reviews
+- Problem: Code-review prompts sent through the Gemma Desktop bridge mechanically worked, but Gemma returned unusable review content: an empty response, `This`, or a refusal-like answer asking for source even when snippets were provided. A direct Ollama reproduction with a tiny JavaScript review prompt also returned an empty response with `done_reason: "length"` after consuming the full token budget.
+- Root Cause: `gemma4:latest` can spend the full response budget without emitting visible text on review-style prompts unless prompted to produce final-answer output; the app also accepted very short review responses as successful and defaulted to a smaller response budget.
+- Solution: Added `think: false` to Ollama generation requests, set deterministic review-friendly generation options, raised the default response token budget to 1024, strengthened the base prompt to ask for final-answer output and concrete review findings, and added one automatic retry for review/code prompts that return empty or too-short text.
+- Files Changed: `README.md`, `PROJECT.md`, `SOLUTIONS.md`, `src/ChatModel.swift`, `src/Models.swift`, `src/OllamaClient.swift`
+- Status: Resolved
+- Verification: Direct Ollama tests confirmed `think: false`/final-answer prompting returns useful bullets; `./tests/run-unit-tests.sh` passed; `./scripts/build-desktop-app.sh` passed; after relaunching `Gemma Desktop.app`, a queued bridge review prompt for the unavailable-add filter returned three concrete review points in `responses/review-smoke-1781448759.json`.

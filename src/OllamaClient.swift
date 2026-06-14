@@ -45,8 +45,11 @@ enum OllamaClient {
             "model": cleanSettings.model,
             "prompt": prompt,
             "stream": true,
+            "think": false,
             "options": [
-                "num_predict": cleanSettings.numPredict
+                "num_predict": cleanSettings.numPredict,
+                "temperature": 0.2,
+                "top_p": 0.9
             ]
         ])
 
@@ -125,4 +128,3 @@ enum OllamaClient {
         return "No error details were returned by Ollama."
     }
 }
-

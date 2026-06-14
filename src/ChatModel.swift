@@ -213,9 +213,12 @@ final class ChatModel: ObservableObject {
         generationTask = Task { [weak self] in
             guard let self else { return }
             do {
-                let reply = try await OllamaClient.streamGenerate(prompt: enrichedPrompt, settings: cleanSettings) { token in
-                    self.appendToMessage(id: replyID, token: token)
-                }
+                let reply = try await self.generateWithReviewRetry(
+                    prompt: enrichedPrompt,
+                    userPrompt: trimmed,
+                    settings: cleanSettings,
+                    replyID: replyID
+                )
                 self.finishGeneration(replyID: replyID, bridgeRequestID: bridgeRequestID, reply: reply, errorMessage: nil)
             } catch is CancellationError {
                 self.finishGeneration(replyID: replyID, bridgeRequestID: bridgeRequestID, reply: nil, errorMessage: "Stopped.")
@@ -225,10 +228,72 @@ final class ChatModel: ObservableObject {
         }
     }
 
+    private func generateWithReviewRetry(prompt: String, userPrompt: String, settings: AppSettings, replyID: UUID) async throws -> String {
+        do {
+            let reply = try await OllamaClient.streamGenerate(prompt: prompt, settings: settings) { token in
+                self.appendToMessage(id: replyID, token: token)
+            }
+            guard shouldRetryReview(userPrompt: userPrompt, reply: reply) else {
+                return reply
+            }
+        } catch {
+            guard shouldRetryReview(userPrompt: userPrompt, reply: "") else {
+                throw error
+            }
+        }
+
+        replaceMessageText(id: replyID, text: "")
+        let retrySettings = AppSettings(
+            model: settings.model,
+            ollamaBaseURL: settings.ollamaBaseURL,
+            timeoutSeconds: settings.timeoutSeconds,
+            numPredict: max(settings.numPredict, 1024)
+        )
+        let retryPrompt = """
+        Output only the final answer. Do not think silently. Do not include hidden reasoning.
+        You are a terse, practical code reviewer. Return 1-3 concrete bullets with file/function names when available.
+        If the provided excerpt is insufficient, say exactly what code is missing.
+
+        \(prompt)
+        """
+
+        return try await OllamaClient.streamGenerate(prompt: retryPrompt, settings: retrySettings) { token in
+            self.appendToMessage(id: replyID, token: token)
+        }
+    }
+
+    private func shouldRetryReview(userPrompt: String, reply: String) -> Bool {
+        guard isReviewLikePrompt(userPrompt) else { return false }
+        let trimmed = reply.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty { return true }
+        if trimmed.split(whereSeparator: \.isWhitespace).count < 8 { return true }
+        return ["this", "ok", "yes", "no"].contains(trimmed.lowercased())
+    }
+
+    private func isReviewLikePrompt(_ prompt: String) -> Bool {
+        let lower = prompt.lowercased()
+        return lower.contains("review")
+            || lower.contains("bug")
+            || lower.contains("issue")
+            || lower.contains("improvement")
+            || lower.contains("function ")
+            || lower.contains("const ")
+            || lower.contains("let ")
+            || lower.contains("```")
+    }
+
     private func appendToMessage(id: UUID, token: String) {
         guard let index = messages.firstIndex(where: { $0.id == id }) else { return }
         var updated = messages[index]
         updated.text += token
+        messages[index] = updated
+        persistBridgeState()
+    }
+
+    private func replaceMessageText(id: UUID, text: String) {
+        guard let index = messages.firstIndex(where: { $0.id == id }) else { return }
+        var updated = messages[index]
+        updated.text = text
         messages[index] = updated
         persistBridgeState()
     }
@@ -318,6 +383,8 @@ final class ChatModel: ObservableObject {
         You cannot directly browse the user's filesystem, open apps, or access the internet by yourself.
         You can only use the text in this prompt and any repository or local-folder snippets the app explicitly provides.
         If asked whether you are local, say that the model is local, but file access is limited to content selected and provided by the app.
+        Output only the final answer. Do not think silently or spend tokens on hidden reasoning.
+        For code review requests, provide 1-3 concrete findings or improvements. If source is missing, ask for the specific files or snippets needed.
         Answer directly and concisely. Do not claim you are running on remote servers.
         """
 

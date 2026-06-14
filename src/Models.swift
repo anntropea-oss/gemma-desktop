@@ -26,7 +26,7 @@ struct AppSettings: Codable, Equatable {
         model: "gemma4:latest",
         ollamaBaseURL: "http://127.0.0.1:11434",
         timeoutSeconds: 300,
-        numPredict: 512
+        numPredict: 1024
     )
 
     static func load() -> AppSettings {
